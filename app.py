@@ -50,11 +50,17 @@ def load_ai_models():
     }
 
 models = load_ai_models()
-groq = Groq(api_key=st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", "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")))
 
-# --- � спутник Data Fetching ---
+# Initialize Groq with error handling
+try:
+    groq = Groq(api_key=st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", "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")))
+except Exception as e:
+    st.error(f"Failed to initialize Groq client: {str(e)}. Running in demo mode only.")
+    groq = None
+
+# --- 🛰️ Data Fetching ---
 def fetch_disaster_data(query, demo_mode=False):
-    if demo_mode:
+    if demo_mode or groq is None:
         disaster_type = random.choice(list(DEMO_DATA.keys()))
         return DEMO_DATA[disaster_type]
     
@@ -93,58 +99,42 @@ def analyze_disaster(query, news_texts, geo_data):
         st.warning(f"Location extraction failed: {str(e)}")
     
     # Disaster Classification with Groq
-    disaster_prompt = f"""
-    Analyze this disaster scenario and provide specific classification:
-    News Headlines: {news_texts[:2]}
-    
-    Respond with valid JSON containing:
-    - "type": specific disaster type (e.g., "Category 4 Hurricane")
-    - "severity": integer from 1 to 10 (e.g., 9, not "9/10")
-    - "severity_rationale": brief explanation
-    Ensure all keys are double-quoted and values are properly formatted (e.g., severity as a number).
-    """
-    
-    try:
-        disaster_analysis = groq.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "user", "content": disaster_prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.3
-        ).choices[0].message.content
-        disaster_analysis = json.loads(disaster_analysis)
-    except Exception as e:
-        st.warning(f"Groq disaster analysis failed: {str(e)}. Using default analysis.")
+    if groq is None:
         disaster_analysis = {
             "type": "Category 4 Hurricane" if "hurricane" in query.lower() else "Unknown Disaster",
             "severity": 9,
-            "severity_rationale": "High impact based on news reports of significant damage."
+            "severity_rationale": "High impact based on demo data."
         }
+    else:
+        disaster_prompt = f"""
+        Analyze this disaster scenario and provide specific classification:
+        News Headlines: {news_texts[:2]}
+        
+        Respond with valid JSON containing:
+        - "type": specific disaster type (e.g., "Category 4 Hurricane")
+        - "severity": integer from 1 to 10 (e.g., 9, not "9/10")
+        - "severity_rationale": brief explanation
+        Ensure all keys are double-quoted and values are properly formatted (e.g., severity as a number).
+        """
+        
+        try:
+            disaster_analysis = groq.chat.completions.create(
+                model="llama3-70b-8192",
+                messages=[{"role": "user", "content": disaster_prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            ).choices[0].message.content
+            disaster_analysis = json.loads(disaster_analysis)
+        except Exception as e:
+            st.warning(f"Groq disaster analysis failed: {str(e)}. Using default analysis.")
+            disaster_analysis = {
+                "type": "Category 4 Hurricane" if "hurricane" in query.lower() else "Unknown Disaster",
+                "severity": 9,
+                "severity_rationale": "High impact based on news reports of significant damage."
+            }
     
     # Generate Response Plan
-    response_prompt = f"""
-    Generate a detailed response plan for:
-    Disaster: {disaster_analysis['type']}
-    Severity: {disaster_analysis['severity']}/10
-    Locations: {locations or 'None'}
-    
-    Provide valid JSON with:
-    - "timeline": ["3 critical events with timestamps in format YYYY-MM-DD HH:MM:SS"]
-    - "actions": ["3 prioritized actions"]
-    - "resources": ["3 most needed resources"]
-    - "sentiment": "analysis of public mood"
-    Ensure all keys are double-quoted and values are properly formatted.
-    """
-    
-    try:
-        response_plan = groq.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "user", "content": response_prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.3
-        ).choices[0].message.content
-        response_plan = json.loads(response_plan)
-    except Exception as e:
-        st.error(f"Groq response plan failed: {str(e)}. Using default response plan.")
+    if groq is None:
         response_plan = {
             "timeline": [
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: Hurricane landfall reported",
@@ -163,6 +153,49 @@ def analyze_disaster(query, news_texts, geo_data):
             ],
             "sentiment": "Anxious and fearful due to severe disaster impact"
         }
+    else:
+        response_prompt = f"""
+        Generate a detailed response plan for:
+        Disaster: {disaster_analysis['type']}
+        Severity: {disaster_analysis['severity']}/10
+        Locations: {locations or 'None'}
+        
+        Provide valid JSON with:
+        - "timeline": ["3 critical events with timestamps in format YYYY-MM-DD HH:MM:SS"]
+        - "actions": ["3 prioritized actions"]
+        - "resources": ["3 most needed resources"]
+        - "sentiment": "analysis of public mood"
+        Ensure all keys are double-quoted and values are properly formatted.
+        """
+        
+        try:
+            response_plan = groq.chat.completions.create(
+                model="llama3-70b-8192",
+                messages=[{"role": "user", "content": response_prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            ).choices[0].message.content
+            response_plan = json.loads(response_plan)
+        except Exception as e:
+            st.error(f"Groq response plan failed: {str(e)}. Using default response plan.")
+            response_plan = {
+                "timeline": [
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: Hurricane landfall reported",
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: Peak storm surge observed",
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: Storm begins to subside"
+                ],
+                "actions": [
+                    "Evacuate high-risk areas, especially coastal and flood-prone zones.",
+                    "Activate emergency services, including responders and rescue teams.",
+                    "Establish communication networks for affected areas."
+                ],
+                "resources": [
+                    "Food and water (100,000 units)",
+                    "Medical supplies (50,000 units)",
+                    "Generators and fuel (500 units)"
+                ],
+                "sentiment": "Anxious and fearful due to severe disaster impact"
+            }
     
     # Sentiment Analysis
     try:
@@ -244,4 +277,81 @@ if st.button("🚀 Launch AI Analysis", type="primary"):
             """, unsafe_allow_html=True)
             
             # Map Visualization
-            if
+            if analysis["geo"]:
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    try:
+                        m = folium.Map(
+                            location=[float(analysis["geo"]["lat"]), float(analysis["geo"]["lon"])], 
+                            zoom_start=7,
+                            tiles="Stamen Terrain"
+                        )
+                        folium.Marker(
+                            [analysis["geo"]["lat"], analysis["geo"]["lon"]],
+                            popup=f"<b>{query}</b><br>Severity: {analysis['severity']}/10",
+                            icon=folium.Icon(color=severity_color, icon="cloud")
+                        ).add_to(m)
+                        folium_static(m)
+                    except:
+                        st.warning("Map rendering failed.")
+                
+                with col2:
+                    st.metric("📍 Primary Location", analysis["geo"].get("display_name", "Unknown"))
+                    st.metric("🌍 Coordinates", f"{analysis['geo']['lat']}, {analysis['geo']['lon']}")
+                    st.metric("📌 Other Locations", len(analysis["locations"]))
+            
+            # Timeline and Actions
+            tab1, tab2, tab3 = st.tabs([
+                "📅 Timeline",
+                "🛠️ Response Plan",
+                "📰 News Sources"
+            ])
+            
+            with tab1:
+                st.image("https://images.pexels.com/photos/3184297/pexels-photo-3184297.jpeg?auto=compress&cs=tinysrgb&w=100", width=100, caption="Timeline")
+                st.subheader("Critical Events Timeline")
+                for event in analysis["timeline"]:
+                    st.markdown(f"⏱️ {event}")
+            
+            with tab2:
+                st.image("https://images.pexels.com/photos/3184287/pexels-photo-3184287.jpeg?auto=compress&cs=tinysrgb&w=100", width=100, caption="Response Plan")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Priority Actions")
+                    for action in analysis["actions"]:
+                        st.markdown(f"✅ {action}")
+                with col2:
+                    st.subheader("Resources Needed")
+                    for resource in analysis["resources"]:
+                        st.markdown(f"📦 {resource}")
+                
+                st.markdown("---")
+                st.subheader("Public Sentiment Analysis")
+                st.write(f"Overall mood: **{analysis['sentiment_label']}** (confidence: {analysis['sentiment_score']:.0%})")
+            
+            with tab3:
+                st.image("https://images.pexels.com/photos/3184291/pexels-photo-3184291.jpeg?auto=compress&cs=tinysrgb&w=100", width=100, caption="News")
+                for news in data["news"]:
+                    st.markdown(f"""
+                    ### {news['title']}
+                    {news.get('snippet', '')}
+                    *[Source]({news.get('link', 'https://www.fema.gov')})*
+                    """)
+                    st.markdown("---")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+### 🏆 Hackathon Compliance
+✅ **Multi-Model AI** (DistilBERT, BERT-NER, Llama3-70B)  
+✅ **Real-Time Data** (SerpAPI + OpenStreetMap)  
+✅ **Advanced Visualization** (Interactive maps + timelines)  
+✅ **Professional UI** (Streamlit + Plotly + Folium)  
+✅ **Complete Documentation**  
+""")
+st.markdown("""
+### 📸 Image Credits
+- Sidebar: [Unsplash](https://unsplash.com/photos/hurricane-satellite-view-4ZJZg9pG9kA)
+- Header: [Pexels](https://www.pexels.com/photo/emergency-response-team-6422823/)
+- Tabs: [Pexels](https://www.pexels.com)
+""")
